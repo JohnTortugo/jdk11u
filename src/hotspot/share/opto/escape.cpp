@@ -3887,21 +3887,6 @@ void ConnectionGraph::clone_addp_and_load_chain(Node* original_phi, uint idx, No
   final_merge_phi->set_req(idx, new_addp);
 }
 
-void ConnectionGraph::print_statistics() {
-  ttyLocker ttyl;
-  tty->print_cr("Number of candidates: %d", _number_of_candidate_methods);
-  tty->print_cr("Number optimized methods: %d", _number_of_optimized_methods);
-  tty->print_cr("Number C2 discarded methods: %d", _number_of_c2_discarded_methods);
-  tty->print_cr("Number all escape methods: %d", _number_of_all_escape_methods);
-  tty->print_cr("Number of Scalar Replaced Objects: %d", _number_of_scalar_replaced_objects);
-}
-
-int ConnectionGraph::_number_of_scalar_replaced_objects = 0;
-int ConnectionGraph::_number_of_candidate_methods = 0;
-int ConnectionGraph::_number_of_optimized_methods = 0;
-int ConnectionGraph::_number_of_all_escape_methods = 0;
-int ConnectionGraph::_number_of_c2_discarded_methods = 0;
-
 #ifndef PRODUCT
 static const char *node_type_names[] = {
   "UnknownType",

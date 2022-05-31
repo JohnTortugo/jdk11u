@@ -1363,7 +1363,7 @@ class Compile : public Phase {
   void verify_barriers() PRODUCT_RETURN;
 
   // End-of-run dumps.
-  static void print_statistics() ;
+  static void print_statistics() PRODUCT_RETURN;
 
   // Dump formatted assembly
   void dump_asm(int *pcs = NULL, uint pc_limit = 0) PRODUCT_RETURN;

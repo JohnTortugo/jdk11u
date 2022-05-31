@@ -224,13 +224,218 @@ AllocStats alloc_stats;
 
 // General statistics printing (profiling ...)
 void print_statistics() {
-  Compile::print_statistics();
+#ifdef ASSERT
+
+  if (CountRuntimeCalls) {
+    extern Histogram *RuntimeHistogram;
+    RuntimeHistogram->print();
+  }
+
+  if (CountJNICalls) {
+    extern Histogram *JNIHistogram;
+    JNIHistogram->print();
+  }
+
+  if (CountJVMCalls) {
+    extern Histogram *JVMHistogram;
+    JVMHistogram->print();
+  }
+
+#endif
+
+  if (MemProfiling) {
+    MemProfiler::disengage();
+  }
+
+  if (CITime) {
+    CompileBroker::print_times();
+  }
+
+#ifdef COMPILER1
+  if ((PrintC1Statistics || LogVMOutput || LogCompilation) && UseCompiler) {
+    FlagSetting fs(DisplayVMOutput, DisplayVMOutput && PrintC1Statistics);
+    Runtime1::print_statistics();
+    Deoptimization::print_statistics();
+    SharedRuntime::print_statistics();
+  }
+#endif /* COMPILER1 */
+
+#ifdef COMPILER2
+  if ((PrintOptoStatistics || LogVMOutput || LogCompilation) && UseCompiler) {
+    FlagSetting fs(DisplayVMOutput, DisplayVMOutput && PrintOptoStatistics);
+    Compile::print_statistics();
+#ifndef COMPILER1
+    Deoptimization::print_statistics();
+    SharedRuntime::print_statistics();
+#endif //COMPILER1
+    os::print_statistics();
+  }
+
+  if (PrintLockStatistics || PrintPreciseBiasedLockingStatistics || PrintPreciseRTMLockingStatistics) {
+    OptoRuntime::print_named_counters();
+  }
+
+  if (TimeLivenessAnalysis) {
+    MethodLiveness::print_times();
+  }
+#ifdef ASSERT
+  if (CollectIndexSetStatistics) {
+    IndexSet::print_statistics();
+  }
+#endif // ASSERT
+#else // COMPILER2
+#if INCLUDE_JVMCI
+#ifndef COMPILER1
+  if ((TraceDeoptimization || LogVMOutput || LogCompilation) && UseCompiler) {
+    FlagSetting fs(DisplayVMOutput, DisplayVMOutput && TraceDeoptimization);
+    Deoptimization::print_statistics();
+    SharedRuntime::print_statistics();
+  }
+#endif // COMPILER1
+#endif // INCLUDE_JVMCI
+#endif // COMPILER2
+
+  if (PrintAOTStatistics) {
+    AOTLoader::print_statistics();
+  }
+
+  if (PrintNMethodStatistics) {
+    nmethod::print_statistics();
+  }
+  if (CountCompiledCalls) {
+    print_method_invocation_histogram();
+  }
+
+  print_method_profiling_data();
+
+  if (TimeCompilationPolicy) {
+    CompilationPolicy::policy()->print_time();
+  }
+  if (TimeOopMap) {
+    GenerateOopMap::print_time();
+  }
+  if (ProfilerCheckIntervals) {
+    PeriodicTask::print_intervals();
+  }
+  if (PrintSymbolTableSizeHistogram) {
+    SymbolTable::print_histogram();
+  }
+  if (CountBytecodes || TraceBytecodes || StopInterpreterAt) {
+    BytecodeCounter::print();
+  }
+  if (PrintBytecodePairHistogram) {
+    BytecodePairHistogram::print();
+  }
+
+  if (PrintCodeCache) {
+    MutexLockerEx mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+    CodeCache::print();
+  }
+
+  // CodeHeap State Analytics.
+  // Does also call NMethodSweeper::print(tty)
+  LogTarget(Trace, codecache) lt;
+  if (lt.is_enabled()) {
+    CompileBroker::print_heapinfo(NULL, "all", 4096); // details
+  } else if (PrintMethodFlushingStatistics) {
+    NMethodSweeper::print(tty);
+  }
+
+  if (PrintCodeCache2) {
+    MutexLockerEx mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+    CodeCache::print_internals();
+  }
+
+  if (PrintVtableStats) {
+    klassVtable::print_statistics();
+    klassItable::print_statistics();
+  }
+  if (VerifyOops && Verbose) {
+    tty->print_cr("+VerifyOops count: %d", StubRoutines::verify_oop_count());
+  }
+
+  print_bytecode_count();
+  if (PrintMallocStatistics) {
+    tty->print("allocation stats: ");
+    alloc_stats.print();
+    tty->cr();
+  }
+
+  if (PrintSystemDictionaryAtExit) {
+    ResourceMark rm;
+    SystemDictionary::print();
+    ClassLoaderDataGraph::print();
+  }
+
+  if (LogTouchedMethods && PrintTouchedMethodsAtExit) {
+    Method::print_touched_methods(tty);
+  }
+
+  if (PrintBiasedLockingStatistics) {
+    BiasedLocking::print_counters();
+  }
+
+  // Native memory tracking data
+  if (PrintNMTStatistics) {
+    MemTracker::final_report(tty);
+  }
+
+  if (PrintMetaspaceStatisticsAtExit) {
+    MetaspaceUtils::print_basic_report(tty, 0);
+  }
+
+  ThreadsSMRSupport::log_statistics();
 }
 
 #else // PRODUCT MODE STATISTICS
 
 void print_statistics() {
-  Compile::print_statistics();
+
+  if (PrintMethodData) {
+    print_method_profiling_data();
+  }
+
+  if (CITime) {
+    CompileBroker::print_times();
+  }
+
+  if (PrintCodeCache) {
+    MutexLockerEx mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+    CodeCache::print();
+  }
+
+  // CodeHeap State Analytics.
+  // Does also call NMethodSweeper::print(tty)
+  LogTarget(Trace, codecache) lt;
+  if (lt.is_enabled()) {
+    CompileBroker::print_heapinfo(NULL, "all", 4096); // details
+  } else if (PrintMethodFlushingStatistics) {
+    NMethodSweeper::print(tty);
+  }
+
+#ifdef COMPILER2
+  if (PrintPreciseBiasedLockingStatistics || PrintPreciseRTMLockingStatistics) {
+    OptoRuntime::print_named_counters();
+  }
+#endif
+  if (PrintBiasedLockingStatistics) {
+    BiasedLocking::print_counters();
+  }
+
+  // Native memory tracking data
+  if (PrintNMTStatistics) {
+    MemTracker::final_report(tty);
+  }
+
+  if (PrintMetaspaceStatisticsAtExit) {
+    MetaspaceUtils::print_basic_report(tty, 0);
+  }
+
+  if (LogTouchedMethods && PrintTouchedMethodsAtExit) {
+    Method::print_touched_methods(tty);
+  }
+
+  ThreadsSMRSupport::log_statistics();
 }
 
 #endif

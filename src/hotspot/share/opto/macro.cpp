@@ -2621,7 +2621,6 @@ void PhaseMacroExpand::eliminate_macro_nodes() {
       case Node::Class_AllocateArray:
         success = eliminate_allocate_node(n->as_Allocate());
         if (success) {
-          Atomic::inc(&ConnectionGraph::_number_of_scalar_replaced_objects);
           _number_of_allocates_removed++;
         }
         break;

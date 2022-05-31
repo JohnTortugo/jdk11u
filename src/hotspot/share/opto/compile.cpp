@@ -252,12 +252,24 @@ void Compile::print_intrinsic_statistics() {
   PRINT_STAT_LINE("total", total, format_flags(_intrinsic_hist_flags[vmIntrinsics::_none], flagsbuf));
   if (xtty != NULL)  xtty->tail("statistics");
 }
-#endif //PRODUCT
 
 void Compile::print_statistics() {
-  ttyLocker ttyl;
-  ConnectionGraph::print_statistics();
+  { ttyLocker ttyl;
+    if (xtty != NULL)  xtty->head("statistics type='opto'");
+    Parse::print_statistics();
+    PhaseCCP::print_statistics();
+    PhaseRegAlloc::print_statistics();
+    Scheduling::print_statistics();
+    PhasePeephole::print_statistics();
+    PhaseIdealLoop::print_statistics();
+    if (xtty != NULL)  xtty->tail("statistics");
+  }
+  if (_intrinsic_hist_flags[vmIntrinsics::_none] != 0) {
+    // put this under its own <statistics> element.
+    print_intrinsic_statistics();
+  }
 }
+#endif //PRODUCT
 
 // Support for bundling info
 Bundle* Compile::node_bundling(const Node *n) {

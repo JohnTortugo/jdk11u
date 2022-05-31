@@ -376,7 +376,6 @@ private:
     _nodes.at_put(n->_idx, ptn);
   }
 
-
   // Utility function for nodes that load an object
   void add_objload_to_connection_graph(Node *n, Unique_Node_List *delayed_worklist);
   // Create PointsToNode node and add it to Connection Graph.
@@ -604,15 +603,6 @@ public:
   static void do_analysis(Compile *C, PhaseIterGVN *igvn, bool only_analysis = false);
 
   void split_bases(Unique_Node_List& split_phi_nodes);
-
-  bool _all_allocates_are_nsr;
-  bool _all_allocates_escape;
-  static int _number_of_scalar_replaced_objects;
-  static int _number_of_candidate_methods;
-  static int _number_of_optimized_methods;
-  static int _number_of_all_escape_methods;
-  static int _number_of_c2_discarded_methods;
-  static void print_statistics();
 
   bool not_global_escape(Node *n);
 
