@@ -343,6 +343,11 @@ private:
 
   Unique_Node_List ideal_nodes; // Used by CG construction and types splitting.
 
+  // Check if the ideal node with ID 'idx' is present in the Connection Graph.
+  bool is_ideal_node_in_graph(uint idx) const {
+    return idx < nodes_size() && _nodes.at(idx) != NULL;
+  }
+
   // Address of an element in _nodes.  Used when the element is to be modified
   PointsToNode* ptnode_adr(int idx) const {
     // There should be no new ideal nodes during ConnectionGraph build,
@@ -370,6 +375,7 @@ private:
     assert(ptn != NULL, "only existing PointsTo node");
     _nodes.at_put(n->_idx, ptn);
   }
+
 
   // Utility function for nodes that load an object
   void add_objload_to_connection_graph(Node *n, Unique_Node_List *delayed_worklist);
@@ -544,6 +550,12 @@ private:
   PhiNode *create_split_phi(PhiNode *orig_phi, int alias_idx, GrowableArray<PhiNode *>  &orig_phi_worklist, bool &new_created);
   PhiNode *split_memory_phi(PhiNode *orig_phi, int alias_idx, GrowableArray<PhiNode *>  &orig_phi_worklist);
 
+  bool should_split_this_phi(Node* n, Unique_Node_List& splitted_phi_nodes);
+  Node* create_selector_phi(Node* orig_phi);
+  void clone_addp_and_load_chain(Node* original_phi, uint idx, Node* original_addp, Node* final_merge_phi);
+  void split_phi_for_addp(Node* orig_phi, Node* use);
+  void split_phi_for_cmpp(Node* orig_phi, Node* use);
+
   void  move_inst_mem(Node* n, GrowableArray<PhiNode *>  &orig_phis);
   Node* find_inst_mem(Node* mem, int alias_idx,GrowableArray<PhiNode *>  &orig_phi_worklist);
   Node* step_through_mergemem(MergeMemNode *mmem, int alias_idx, const TypeOopPtr *toop);
@@ -580,7 +592,7 @@ private:
   }
 
   // Compute the escape information
-  bool compute_escape();
+  bool compute_escape(bool only_analysis);
 
 public:
   ConnectionGraph(Compile *C, PhaseIterGVN *igvn);
@@ -589,12 +601,24 @@ public:
   static bool has_candidates(Compile *C);
 
   // Perform escape analysis
-  static void do_analysis(Compile *C, PhaseIterGVN *igvn);
+  static void do_analysis(Compile *C, PhaseIterGVN *igvn, bool only_analysis = false);
+
+  void split_bases(Unique_Node_List& split_phi_nodes);
+
+  bool _all_allocates_are_nsr;
+  bool _all_allocates_escape;
+  static int _number_of_scalar_replaced_objects;
+  static int _number_of_candidate_methods;
+  static int _number_of_optimized_methods;
+  static int _number_of_all_escape_methods;
+  static int _number_of_c2_discarded_methods;
+  static void print_statistics();
 
   bool not_global_escape(Node *n);
 
 #ifndef PRODUCT
   void dump(GrowableArray<PointsToNode*>& ptnodes_worklist);
+  void dump_ir(const char* title);
 #endif
 };
 

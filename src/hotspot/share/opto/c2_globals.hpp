@@ -141,7 +141,7 @@
   notproduct(bool, OptoNoExecute, false,                                    \
           "Attempt to parse and compile but do not execute generated code") \
                                                                             \
-  notproduct(bool, PrintOptoStatistics, false,                              \
+  product(bool, PrintOptoStatistics, false,                                 \
           "Print New compiler statistics")                                  \
                                                                             \
   diagnostic(bool, PrintOptoAssembly, false,                                \
@@ -521,6 +521,9 @@
                                                                             \
   develop(bool, TracePostallocExpand, false, "Trace expanding nodes after"  \
           " register allocation.")                                          \
+                                                                            \
+  product(bool, SplitPhiBases, false,                                       \
+          "Split object bases through Phis")                                \
                                                                             \
   product(bool, DoEscapeAnalysis, true,                                     \
           "Perform escape analysis")                                        \

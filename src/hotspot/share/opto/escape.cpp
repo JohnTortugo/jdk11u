@@ -96,7 +96,7 @@ bool ConnectionGraph::has_candidates(Compile *C) {
   return false;
 }
 
-void ConnectionGraph::do_analysis(Compile *C, PhaseIterGVN *igvn) {
+void ConnectionGraph::do_analysis(Compile *C, PhaseIterGVN *igvn, bool only_analysis) {
   Compile::TracePhase tp("escapeAnalysis", &Phase::timers[Phase::_t_escapeAnalysis]);
   ResourceMark rm;
 
@@ -106,9 +106,12 @@ void ConnectionGraph::do_analysis(Compile *C, PhaseIterGVN *igvn) {
   Node* noop_null = igvn->zerocon(T_NARROWOOP);
   ConnectionGraph* congraph = new(C->comp_arena()) ConnectionGraph(C, igvn);
   // Perform escape analysis
-  if (congraph->compute_escape()) {
+  if (congraph->compute_escape(only_analysis)) {
     // There are non escaping objects.
     C->set_congraph(congraph);
+  }
+  else {
+    C->set_congraph(NULL);
   }
   // Cleanup.
   if (oop_null->outcnt() == 0)
@@ -117,7 +120,7 @@ void ConnectionGraph::do_analysis(Compile *C, PhaseIterGVN *igvn) {
     igvn->hash_delete(noop_null);
 }
 
-bool ConnectionGraph::compute_escape() {
+bool ConnectionGraph::compute_escape(bool only_analysis) {
   Compile* C = _compile;
   PhaseGVN* igvn = _igvn;
 
@@ -237,6 +240,20 @@ bool ConnectionGraph::compute_escape() {
     // All objects escaped or hit time or iterations limits.
     _collecting = false;
     return false;
+  }
+
+  // 2.a The step above might have transitively marked objects in non_escaped_allocs_worklist
+  // as ArgEscape or GlobalEscape
+  for (int next = non_escaped_worklist.length()-1; next >= 0 ; --next) {
+    JavaObjectNode* ptn = non_escaped_worklist.at(next);
+    if (ptn->escape_state() >= PointsToNode::ArgEscape) {
+      non_escaped_worklist.delete_at(next);
+    }
+  }
+
+  if (only_analysis) {
+    _collecting = false;
+    return non_escaped_worklist.length() > 0;
   }
 
   // 3. Adjust scalar_replaceable state of nonescaping objects and push
@@ -3551,6 +3568,340 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
 #endif
 }
 
+
+//
+// We are only going to split nodes that match the following requirements:
+//  - It's a Phi node and EA has deemed it as NoEscape.
+//  - At least one of the merge inputs of the Phi points to an Allocate node.
+bool ConnectionGraph::should_split_this_phi(Node* n, Unique_Node_List& splitted_phi_nodes) {
+  ttyLocker ttl;
+  if (!n->is_Phi())                     return false;
+  if (!is_ideal_node_in_graph(n->_idx)) return false;
+
+  PointsToNode* ptn = ptnode_adr(n->_idx);
+  Unique_Node_List allocates;
+  bool should_split = false;
+
+  if (ptn == NULL)                                                return false;
+  if (ptn->escape_state() != PointsToNode::NoEscape) return false;
+
+  // Check if this Phi node actually point to any Allocate node. Try to find *any*
+  // Allocate that this Phi might be pointing to.
+  Arena* arena = Thread::current()->resource_area();
+  VectorSet visited(arena);
+  GrowableArray<PointsToNode*> worklist;
+  worklist.push(ptn);
+  while (worklist.length() > 0) {
+    PointsToNode* next = worklist.pop();
+
+    if (visited.test_set(next->idx())) {
+      continue;
+    }
+
+    for (EdgeIterator i(next); i.has_next(); i.next()) {
+      PointsToNode* e = i.get();
+
+      if (e->ideal_node()->Opcode() == Op_Allocate) {
+        allocates.push(e->ideal_node());
+        should_split = true;
+      }
+
+      worklist.push(e);
+    }
+
+    if (next->is_Field()) {
+      FieldNode* f = (FieldNode*)next;
+
+      next->dump(true);
+
+      for (BaseIterator i(f); i.has_next(); i.next()) {
+        PointsToNode* b = i.get();
+
+        if (b->ideal_node()->Opcode() == Op_Allocate) {
+          allocates.push(b->ideal_node());
+          should_split = true;
+        }
+
+        worklist.push(b);
+      }
+    }
+  }
+
+  if (should_split) {
+#ifndef PRODUCT
+//    tty->print("Candidate Phi: %d", n->_idx);
+//    for (uint inp_idx=1; inp_idx<n->req(); inp_idx++)
+//      tty->print(" %d:%s", n->in(inp_idx)->_idx, n->in(inp_idx)->Name());
+//    tty->cr();
+#endif
+
+    for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
+      Node* m = n->fast_out(i);
+
+      if (m->is_AddP()) {
+        // Check if Addp and it's uses don't have control input
+        if (m->in(0) != NULL) {
+          should_split = false;
+          //NOT_PRODUCT(tty->print_cr("\tAddP has control input.");)
+        }
+
+        for (DUIterator_Fast jmax, j = m->fast_outs(jmax); j < jmax; j++) {
+          Node* addp_use = m->fast_out(j);
+
+          if (!addp_use->is_Load()) {
+            should_split = false;
+            //NOT_PRODUCT(tty->print_cr("\tUser of AddP is not a Load. %s", addp_use->Name());)
+          }
+          else if (!addp_use->in(LoadNode::Memory)->is_Phi() || addp_use->in(LoadNode::Memory)->in(0) != n->in(0)) {
+            should_split = false;
+            //NOT_PRODUCT(tty->print_cr("\tMemory input of Load isn't a Phi or a Phi controlled by same region of original Phi");)
+          }
+
+          if (addp_use->in(0) != NULL) {
+            should_split = false;
+            //NOT_PRODUCT(tty->print_cr("\tAn user of AddP has control input.");)
+          }
+        }
+      }
+      else if (m->is_SafePoint() || (m->is_CallStaticJava() && m->as_CallStaticJava()->uncommon_trap_request() != 0)) {
+        // No further check needed
+      }
+      //else if (m->Opcode() == Op_CmpP) {
+      //  if (m->in(0) != NULL) {
+      //    should_split = false;
+      //    NOT_PRODUCT(tty->print_cr("\tCmpP has control input.");)
+      //  }
+      //  tty->print_cr("\tCmpP -1 %d:%s:%d %d:%s:%d", m->in(1)->_idx, m->in(1)->Name(), m->in(1)->in(0) != NULL ? m->in(1)->in(0)->_idx : 0,
+      //                                             m->in(2)->_idx, m->in(2)->Name(), m->in(2)->in(0) != NULL ? m->in(2)->in(0)->_idx : 0);
+      //}
+      //else if (m->Opcode() == Op_CastPP) {
+      //}
+      else {
+        should_split = false;
+        //NOT_PRODUCT(tty->print_cr("\tUnsupported use: %s (CTRL: %d) (TRAP: %d)", m->Name(), m->in(0) == NULL ? -1 : m->in(0)->_idx, m->is_CallStaticJava() ? m->as_CallStaticJava()->is_uncommon_trap() : 0);)
+      }
+    }
+
+    //NOT_PRODUCT(tty->print_cr("\t -> Will%stry to split this %d Phi!", should_split ? " " : " NOT ", n->_idx);)
+
+    // We'll check that all nodes in splitted_phi_nodes were removed from
+    // the IR graph after macro node expansion. We should only check that
+    // the allocates were removed if we indeed ran split_phi_bases.
+    if (should_split) {
+      for (uint next = 0; next < allocates.size(); ++next) {
+        Node* allocate = allocates.at(next);
+        splitted_phi_nodes.push(allocate);
+        //NOT_PRODUCT(tty->print_cr("\t\t\tTo remove this allocate: %d %s", allocate->_idx, allocate->Name());)
+      }
+    }
+  }
+  //else {
+  //  NOT_PRODUCT(tty->print_cr("\tDoesn't merge any Allocate.");)
+  //}
+
+  return should_split;
+}
+
+void ConnectionGraph::split_bases(Unique_Node_List& splitted_phi_nodes) {
+  Unique_Node_List ideal_nodes;
+  ideal_nodes.map(_compile->live_nodes(), NULL);
+  ideal_nodes.push(_compile->root());
+
+  bool prev_delay_transform = _igvn->delay_transform();
+  _igvn->set_delay_transform(true);
+
+  NOT_PRODUCT(dump_ir("Before Split_Bases");)
+
+  // Iterate over all IR nodes looking for Regions.
+  //   When a region is found we'll look for Phi nodes coming out of the region.
+  //     When we find a Phi node we check if we can/need to split it.
+  for (uint next = 0; next < ideal_nodes.size(); ++next) {
+    Node* candidate_region = ideal_nodes.at(next);
+
+    if (candidate_region->is_Region()) {
+      // current_parent_control is the node that produces Control for the next
+      // IfNode that checks which base should be used when we split a Phi.
+      Unique_Node_List uses_of_region;
+
+      for (DUIterator i = candidate_region->outs(); candidate_region->has_out(i); i++) {
+        uses_of_region.push(candidate_region->out(i));
+      }
+
+      // Search for a Phi node.
+      for (uint region_use_idx = 0; region_use_idx < uses_of_region.size(); ++region_use_idx) {
+        Node* candidate_phi = uses_of_region.at(region_use_idx);
+
+        // Performs several checks to see if we can/should split this Phi
+        if (should_split_this_phi(candidate_phi, splitted_phi_nodes)) {
+          // We decided to split the Phi node. Now we go over each of it's use
+          // and patch them to use the Phi inputs directly - conditioned on the
+          // selector If.
+          Unique_Node_List uses;
+          for (uint i = 0; i < candidate_phi->outcnt(); i++) {
+            Node* original_phi_use = candidate_phi->raw_out(i);
+            uses.push(original_phi_use);
+          }
+
+          for (uint i = 0; i < uses.size(); i++) {
+            Node* original_phi_use = uses.at(i);
+
+            if (original_phi_use->is_AddP() && original_phi_use->in(TypeFunc::Control) == NULL) {
+              split_phi_for_addp(candidate_phi, original_phi_use);
+            }
+            //else if (original_phi_use->Opcode() == Op_CmpP) {
+            //  split_phi_for_cmpp(candidate_phi, original_phi_use);
+            //}
+            else if (original_phi_use->is_SafePoint() || (original_phi_use->is_CallStaticJava() && original_phi_use->as_CallStaticJava()->uncommon_trap_request() != 0)) {
+            //  _igvn->_worklist.push(original_phi_use);
+            //  original_phi_use->replace_edge(candidate_phi, _compile->top(), _igvn);
+            }
+            else {
+              NOT_PRODUCT(tty->print_cr("Unsupported Phi use. SHOULD NOT HAPPEN. %s", original_phi_use->Name());)
+            }
+          }
+
+          //_igvn->remove_dead_node(candidate_phi);
+        }
+      }
+    }
+
+    for (DUIterator_Fast imax, i = candidate_region->fast_outs(imax); i < imax; i++) {
+      Node* m = candidate_region->fast_out(i);
+      ideal_nodes.push(m);
+    }
+  }
+
+  // NOT_PRODUCT( dump_ir("After Split_Bases"); )
+
+  _igvn->set_delay_transform(prev_delay_transform);
+}
+
+void ConnectionGraph::split_phi_for_cmpp(Node* original_phi, Node* original_cmp) {
+  Node* merge_phi = _igvn->transform(PhiNode::make_blank(original_phi->in(0), original_cmp));
+
+  for (uint idx=1; idx < original_phi->req(); idx++ ) {
+    Node* new_cmp = _igvn->transform(original_cmp->clone());
+    new_cmp->replace_edge(original_phi, original_phi->in(idx), _igvn);
+    merge_phi->set_req(idx, new_cmp);
+  }
+
+  for (DUIterator_Fast imax, i = original_cmp->fast_outs(imax); i < imax; i++) {
+    Node* cmp_use = original_cmp->fast_out(i);
+    _igvn->hash_delete(cmp_use);
+  }
+
+  _igvn->hash_delete(merge_phi);
+  _igvn->hash_delete(original_cmp);
+  original_cmp->replace_by(merge_phi);
+  _igvn->hash_insert(merge_phi);
+
+  for (DUIterator_Fast imax, i = merge_phi->fast_outs(imax); i < imax; i++) {
+    Node* merge_use = merge_phi->fast_out(i);
+    _igvn->_worklist.push(merge_use);
+    _igvn->hash_insert(merge_use);
+  }
+
+  _igvn->remove_dead_node(original_cmp);
+}
+
+void ConnectionGraph::split_phi_for_addp(Node* original_phi, Node* original_addp) {
+  Node_List new_addps;
+  Node_List addp_uses;
+  Node_List addp_uses_uses;
+
+  // Create a clone of original_addp for each non-control input in original_phi
+  for (uint idx=1; idx < original_phi->req(); idx++ ) {
+    Node* new_addp = _igvn->transform(original_addp->clone());
+    new_addp->replace_edge(original_phi, original_phi->in(idx), _igvn);
+
+    // If the AddP "adr" is different from the "base" we need to create an
+    // unique "adr" input for it as well
+    if (new_addp->in(AddPNode::Base) != new_addp->in(AddPNode::Address)) {
+      Node* orig_addp_adr   = new_addp->in(AddPNode::Address);
+
+      new_addp->replace_edge(orig_addp_adr, orig_addp_adr->is_Phi() ? orig_addp_adr->in(idx) : orig_addp_adr, _igvn);
+    }
+
+    new_addps.push(new_addp);
+  }
+
+  for (DUIterator_Fast imax, i = original_addp->fast_outs(imax); i < imax; i++) {
+    Node* addp_use = original_addp->fast_out(i);
+    _igvn->hash_delete(addp_use);
+    addp_uses.push(addp_use);
+
+    for (DUIterator_Fast jmax, j = addp_use->fast_outs(jmax); j < jmax; j++) {
+      Node* addp_use_use = addp_use->fast_out(j);
+      _igvn->hash_delete(addp_use_use);
+      addp_uses_uses.push(addp_use_use);
+    }
+  }
+
+  // Create cloneS of each use of the original_addp. One clone for each different addp-base
+  for (uint i=0; i < addp_uses.size(); ++i) {
+    Node* addp_use = addp_uses.at(i);
+    Node* merge_phi = _igvn->transform(PhiNode::make_blank(original_phi->in(0), addp_use));
+
+    for (uint next=0, idx=1; next < new_addps.size(); ++next, ++idx) {
+      Node* new_addp     = new_addps.at(next);
+      Node* new_addp_use = _igvn->transform(addp_use->clone());
+
+      new_addp_use->replace_edge(original_addp, new_addp, _igvn);
+
+      Node* orig_load_mem   = new_addp_use->in(LoadNode::Memory);
+      new_addp_use->replace_edge(orig_load_mem, orig_load_mem->is_Phi() ? orig_load_mem->in(idx) : orig_load_mem);
+
+      merge_phi->set_req(idx, new_addp_use);
+    }
+
+    _igvn->hash_delete(merge_phi);
+    addp_use->replace_by(merge_phi);
+    _igvn->hash_insert(merge_phi);
+  }
+
+  for (uint next=0; next < addp_uses_uses.size(); ++next) {
+    Node* use_use = addp_uses_uses.at(next);
+    _igvn->_worklist.push(use_use);
+  }
+
+
+  for (uint i=0; i < addp_uses.size(); ++i) {
+    Node* addp_use = addp_uses.at(i);
+    _igvn->remove_dead_node(addp_use);
+  }
+}
+
+void ConnectionGraph::clone_addp_and_load_chain(Node* original_phi, uint idx, Node* original_addp, Node* final_merge_phi) {
+  Node* new_addp = _igvn->transform(original_addp->clone());
+
+  new_addp->replace_edge(original_phi, original_phi->in(idx));
+
+  // If the AddP "adr" is different from the "base" we need to create an
+  // unique "adr" input for it as well
+  if (new_addp->in(AddPNode::Base) != new_addp->in(AddPNode::Address)) {
+    Node* orig_addp_adr   = new_addp->in(AddPNode::Address);
+
+    new_addp->replace_edge(orig_addp_adr, orig_addp_adr->is_Phi() ? orig_addp_adr->in(idx) : orig_addp_adr);
+  }
+
+  final_merge_phi->set_req(idx, new_addp);
+}
+
+void ConnectionGraph::print_statistics() {
+  ttyLocker ttyl;
+  tty->print_cr("Number of candidates: %d", _number_of_candidate_methods);
+  tty->print_cr("Number optimized methods: %d", _number_of_optimized_methods);
+  tty->print_cr("Number C2 discarded methods: %d", _number_of_c2_discarded_methods);
+  tty->print_cr("Number all escape methods: %d", _number_of_all_escape_methods);
+  tty->print_cr("Number of Scalar Replaced Objects: %d", _number_of_scalar_replaced_objects);
+}
+
+int ConnectionGraph::_number_of_scalar_replaced_objects = 0;
+int ConnectionGraph::_number_of_candidate_methods = 0;
+int ConnectionGraph::_number_of_optimized_methods = 0;
+int ConnectionGraph::_number_of_all_escape_methods = 0;
+int ConnectionGraph::_number_of_c2_discarded_methods = 0;
+
 #ifndef PRODUCT
 static const char *node_type_names[] = {
   "UnknownType",
@@ -3646,5 +3997,28 @@ void ConnectionGraph::dump(GrowableArray<PointsToNode*>& ptnodes_worklist) {
       tty->cr();
     }
   }
+}
+
+void ConnectionGraph::dump_ir(const char* title) {
+    ttyLocker ttyl;  // keep the following output all in one block
+
+    tty->print_cr("%s", title);
+
+    Unique_Node_List ideal_nodes; // Used by CG construction and types splitting.
+    ideal_nodes.map(_compile->live_nodes(), NULL);  // preallocate space
+    ideal_nodes.push(_compile->root());
+
+    for( uint next = 0; next < ideal_nodes.size(); ++next ) {
+      Node* n = ideal_nodes.at(next);
+
+      n->dump();
+
+      for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
+        Node* m = n->fast_out(i);
+        ideal_nodes.push(m);
+      }
+    }
+
+    tty->cr(); tty->cr(); tty->cr(); tty->cr();
 }
 #endif

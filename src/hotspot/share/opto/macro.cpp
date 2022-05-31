@@ -43,6 +43,7 @@
 #include "opto/opaquenode.hpp"
 #include "opto/phaseX.hpp"
 #include "opto/rootnode.hpp"
+#include "opto/escape.hpp"
 #include "opto/runtime.hpp"
 #include "opto/subnode.hpp"
 #include "opto/type.hpp"
@@ -2619,6 +2620,10 @@ void PhaseMacroExpand::eliminate_macro_nodes() {
       case Node::Class_Allocate:
       case Node::Class_AllocateArray:
         success = eliminate_allocate_node(n->as_Allocate());
+        if (success) {
+          Atomic::inc(&ConnectionGraph::_number_of_scalar_replaced_objects);
+          _number_of_allocates_removed++;
+        }
         break;
       case Node::Class_CallStaticJava:
         success = eliminate_boxing_node(n->as_CallStaticJava());
