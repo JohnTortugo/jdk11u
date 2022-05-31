@@ -3562,7 +3562,6 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
 //  - It's a Phi node and EA has deemed it as NoEscape.
 //  - At least one of the merge inputs of the Phi points to an Allocate node.
 bool ConnectionGraph::should_split_this_phi(Node* n) {
-  ttyLocker ttl;
   if (!n->is_Phi())                     return false;
   if (!is_ideal_node_in_graph(n->_idx)) return false;
 
@@ -3597,8 +3596,6 @@ bool ConnectionGraph::should_split_this_phi(Node* n) {
 
     if (next->is_Field()) {
       FieldNode* f = (FieldNode*)next;
-
-      next->dump(true);
 
       for (BaseIterator i(f); i.has_next(); i.next()) {
         PointsToNode* b = i.get();
@@ -3691,19 +3688,16 @@ void ConnectionGraph::split_bases() {
           for (uint i = 0; i < uses.size(); i++) {
             Node* original_phi_use = uses.at(i);
 
-            if (original_phi_use->is_AddP() && original_phi_use->in(TypeFunc::Control) == NULL) {
+            if (original_phi_use->is_AddP()) {
               split_phi_for_addp(candidate_phi, original_phi_use);
             }
             else if (original_phi_use->is_SafePoint() || (original_phi_use->is_CallStaticJava() && original_phi_use->as_CallStaticJava()->uncommon_trap_request() != 0)) {
-            //  _igvn->_worklist.push(original_phi_use);
-            //  original_phi_use->replace_edge(candidate_phi, _compile->top(), _igvn);
+              // Do nothing
             }
             else {
               NOT_PRODUCT(tty->print_cr("Unsupported Phi use. SHOULD NOT HAPPEN. %s", original_phi_use->Name());)
             }
           }
-
-          //_igvn->remove_dead_node(candidate_phi);
         }
       }
     }
