@@ -110,9 +110,6 @@ void ConnectionGraph::do_analysis(Compile *C, PhaseIterGVN *igvn, bool only_anal
     // There are non escaping objects.
     C->set_congraph(congraph);
   }
-  else {
-    C->set_congraph(NULL);
-  }
   // Cleanup.
   if (oop_null->outcnt() == 0)
     igvn->hash_delete(oop_null);
@@ -240,15 +237,6 @@ bool ConnectionGraph::compute_escape(bool only_analysis) {
     // All objects escaped or hit time or iterations limits.
     _collecting = false;
     return false;
-  }
-
-  // 2.a The step above might have transitively marked objects in non_escaped_allocs_worklist
-  // as ArgEscape or GlobalEscape
-  for (int next = non_escaped_worklist.length()-1; next >= 0 ; --next) {
-    JavaObjectNode* ptn = non_escaped_worklist.at(next);
-    if (ptn->escape_state() >= PointsToNode::ArgEscape) {
-      non_escaped_worklist.delete_at(next);
-    }
   }
 
   if (only_analysis) {
@@ -3579,7 +3567,6 @@ bool ConnectionGraph::should_split_this_phi(Node* n) {
   if (!is_ideal_node_in_graph(n->_idx)) return false;
 
   PointsToNode* ptn = ptnode_adr(n->_idx);
-  Unique_Node_List allocates;
   bool should_split = false;
 
   if (ptn == NULL)                                                return false;
@@ -3602,7 +3589,6 @@ bool ConnectionGraph::should_split_this_phi(Node* n) {
       PointsToNode* e = i.get();
 
       if (e->ideal_node()->Opcode() == Op_Allocate) {
-        allocates.push(e->ideal_node());
         should_split = true;
       }
 
@@ -3618,7 +3604,6 @@ bool ConnectionGraph::should_split_this_phi(Node* n) {
         PointsToNode* b = i.get();
 
         if (b->ideal_node()->Opcode() == Op_Allocate) {
-          allocates.push(b->ideal_node());
           should_split = true;
         }
 
@@ -3628,65 +3613,37 @@ bool ConnectionGraph::should_split_this_phi(Node* n) {
   }
 
   if (should_split) {
-#ifndef PRODUCT
-//    tty->print("Candidate Phi: %d", n->_idx);
-//    for (uint inp_idx=1; inp_idx<n->req(); inp_idx++)
-//      tty->print(" %d:%s", n->in(inp_idx)->_idx, n->in(inp_idx)->Name());
-//    tty->cr();
-#endif
-
     for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
       Node* m = n->fast_out(i);
 
       if (m->is_AddP()) {
-        // Check if Addp and it's uses don't have control input
         if (m->in(0) != NULL) {
-          should_split = false;
-          //NOT_PRODUCT(tty->print_cr("\tAddP has control input.");)
+          should_split = false;   // Addp has control input
         }
 
         for (DUIterator_Fast jmax, j = m->fast_outs(jmax); j < jmax; j++) {
           Node* addp_use = m->fast_out(j);
 
           if (!addp_use->is_Load()) {
-            should_split = false;
-            //NOT_PRODUCT(tty->print_cr("\tUser of AddP is not a Load. %s", addp_use->Name());)
+            should_split = false;       // User of AddP is not a Load.
           }
           else if (!addp_use->in(LoadNode::Memory)->is_Phi() || addp_use->in(LoadNode::Memory)->in(0) != n->in(0)) {
-            should_split = false;
-            //NOT_PRODUCT(tty->print_cr("\tMemory input of Load isn't a Phi or a Phi controlled by same region of original Phi");)
+            should_split = false;       // Memory input of Load isn't a Phi or a Phi controlled by same region of original Phi
           }
 
           if (addp_use->in(0) != NULL) {
-            should_split = false;
-            //NOT_PRODUCT(tty->print_cr("\tAn user of AddP has control input.");)
+            should_split = false;       // An user of AddP has control input.
           }
         }
       }
       else if (m->is_SafePoint() || (m->is_CallStaticJava() && m->as_CallStaticJava()->uncommon_trap_request() != 0)) {
         // No further check needed
       }
-      //else if (m->Opcode() == Op_CmpP) {
-      //  if (m->in(0) != NULL) {
-      //    should_split = false;
-      //    NOT_PRODUCT(tty->print_cr("\tCmpP has control input.");)
-      //  }
-      //  tty->print_cr("\tCmpP -1 %d:%s:%d %d:%s:%d", m->in(1)->_idx, m->in(1)->Name(), m->in(1)->in(0) != NULL ? m->in(1)->in(0)->_idx : 0,
-      //                                             m->in(2)->_idx, m->in(2)->Name(), m->in(2)->in(0) != NULL ? m->in(2)->in(0)->_idx : 0);
-      //}
-      //else if (m->Opcode() == Op_CastPP) {
-      //}
       else {
-        should_split = false;
-        //NOT_PRODUCT(tty->print_cr("\tUnsupported use: %s (CTRL: %d) (TRAP: %d)", m->Name(), m->in(0) == NULL ? -1 : m->in(0)->_idx, m->is_CallStaticJava() ? m->as_CallStaticJava()->is_uncommon_trap() : 0);)
+        should_split = false; // Unsupported use
       }
     }
-
-    //NOT_PRODUCT(tty->print_cr("\t -> Will%stry to split this %d Phi!", should_split ? " " : " NOT ", n->_idx);)
   }
-  //else {
-  //  NOT_PRODUCT(tty->print_cr("\tDoesn't merge any Allocate.");)
-  //}
 
   return should_split;
 }

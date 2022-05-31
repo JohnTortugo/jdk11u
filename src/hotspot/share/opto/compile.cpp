@@ -2342,10 +2342,12 @@ void Compile::Optimize() {
       if (failing())  return;
     }
 
-    uint hash = ir_graph_hash(root(), method()->holder()->name()->hash(), method()->name()->hash());
+    uint hash = 0;
     uint scaled = 0;
 
     if (SplitPhiBases) {
+      hash = ir_graph_hash(root(), method()->holder()->name()->hash(), method()->name()->hash());
+
       ConnectionGraph::do_analysis(this, &igvn, true);
       if (failing())  return;
 
@@ -2383,7 +2385,10 @@ void Compile::Optimize() {
       if (failing())  return;
     }
 
-    tty->print_cr("Hash is -> %X -> scaled %u -> %s::%s", hash, scaled, _method->holder()->name()->as_utf8(), _method->name()->as_utf8());
+    if (SplitPhiBases) {
+      ttyLocker ttyl;
+      tty->print_cr("Hash is -> %X -> scaled %u -> %s::%s", hash, scaled, _method->holder()->name()->as_utf8(), _method->name()->as_utf8());
+    }
   }
 
   // Loop transforms on the ideal graph.  Range Check Elimination,
