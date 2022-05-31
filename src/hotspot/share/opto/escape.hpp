@@ -550,10 +550,7 @@ private:
   PhiNode *split_memory_phi(PhiNode *orig_phi, int alias_idx, GrowableArray<PhiNode *>  &orig_phi_worklist);
 
   bool should_split_this_phi(Node* n);
-  Node* create_selector_phi(Node* orig_phi);
-  void clone_addp_and_load_chain(Node* original_phi, uint idx, Node* original_addp, Node* final_merge_phi);
   void split_phi_for_addp(Node* orig_phi, Node* use);
-  void split_phi_for_cmpp(Node* orig_phi, Node* use);
 
   void  move_inst_mem(Node* n, GrowableArray<PhiNode *>  &orig_phis);
   Node* find_inst_mem(Node* mem, int alias_idx,GrowableArray<PhiNode *>  &orig_phi_worklist);
@@ -602,7 +599,7 @@ public:
   // Perform escape analysis
   static void do_analysis(Compile *C, PhaseIterGVN *igvn, bool only_analysis = false);
 
-  void split_bases(Unique_Node_List& split_phi_nodes);
+  void split_bases();
 
   bool not_global_escape(Node *n);
 

@@ -3737,9 +3737,6 @@ void ConnectionGraph::split_bases() {
             if (original_phi_use->is_AddP() && original_phi_use->in(TypeFunc::Control) == NULL) {
               split_phi_for_addp(candidate_phi, original_phi_use);
             }
-            //else if (original_phi_use->Opcode() == Op_CmpP) {
-            //  split_phi_for_cmpp(candidate_phi, original_phi_use);
-            //}
             else if (original_phi_use->is_SafePoint() || (original_phi_use->is_CallStaticJava() && original_phi_use->as_CallStaticJava()->uncommon_trap_request() != 0)) {
             //  _igvn->_worklist.push(original_phi_use);
             //  original_phi_use->replace_edge(candidate_phi, _compile->top(), _igvn);
@@ -3763,34 +3760,6 @@ void ConnectionGraph::split_bases() {
   // NOT_PRODUCT( dump_ir("After Split_Bases"); )
 
   _igvn->set_delay_transform(prev_delay_transform);
-}
-
-void ConnectionGraph::split_phi_for_cmpp(Node* original_phi, Node* original_cmp) {
-  Node* merge_phi = _igvn->transform(PhiNode::make_blank(original_phi->in(0), original_cmp));
-
-  for (uint idx=1; idx < original_phi->req(); idx++ ) {
-    Node* new_cmp = _igvn->transform(original_cmp->clone());
-    new_cmp->replace_edge(original_phi, original_phi->in(idx), _igvn);
-    merge_phi->set_req(idx, new_cmp);
-  }
-
-  for (DUIterator_Fast imax, i = original_cmp->fast_outs(imax); i < imax; i++) {
-    Node* cmp_use = original_cmp->fast_out(i);
-    _igvn->hash_delete(cmp_use);
-  }
-
-  _igvn->hash_delete(merge_phi);
-  _igvn->hash_delete(original_cmp);
-  original_cmp->replace_by(merge_phi);
-  _igvn->hash_insert(merge_phi);
-
-  for (DUIterator_Fast imax, i = merge_phi->fast_outs(imax); i < imax; i++) {
-    Node* merge_use = merge_phi->fast_out(i);
-    _igvn->_worklist.push(merge_use);
-    _igvn->hash_insert(merge_use);
-  }
-
-  _igvn->remove_dead_node(original_cmp);
 }
 
 void ConnectionGraph::split_phi_for_addp(Node* original_phi, Node* original_addp) {
@@ -3858,22 +3827,6 @@ void ConnectionGraph::split_phi_for_addp(Node* original_phi, Node* original_addp
     Node* addp_use = addp_uses.at(i);
     _igvn->remove_dead_node(addp_use);
   }
-}
-
-void ConnectionGraph::clone_addp_and_load_chain(Node* original_phi, uint idx, Node* original_addp, Node* final_merge_phi) {
-  Node* new_addp = _igvn->transform(original_addp->clone());
-
-  new_addp->replace_edge(original_phi, original_phi->in(idx));
-
-  // If the AddP "adr" is different from the "base" we need to create an
-  // unique "adr" input for it as well
-  if (new_addp->in(AddPNode::Base) != new_addp->in(AddPNode::Address)) {
-    Node* orig_addp_adr   = new_addp->in(AddPNode::Address);
-
-    new_addp->replace_edge(orig_addp_adr, orig_addp_adr->is_Phi() ? orig_addp_adr->in(idx) : orig_addp_adr);
-  }
-
-  final_merge_phi->set_req(idx, new_addp);
 }
 
 #ifndef PRODUCT
