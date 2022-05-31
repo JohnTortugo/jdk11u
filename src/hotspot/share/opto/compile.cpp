@@ -2342,7 +2342,6 @@ void Compile::Optimize() {
       if (failing())  return;
     }
 
-    Unique_Node_List splitted_phi_nodes;
     uint hash = ir_graph_hash(root(), method()->holder()->name()->hash(), method()->name()->hash());
     uint scaled = 0;
 
@@ -2355,7 +2354,7 @@ void Compile::Optimize() {
 
       // Only try to split-phis if there are Allocate nodes that NoEscape
       if (congraph() != NULL) {
-        congraph()->split_bases(splitted_phi_nodes);
+        congraph()->split_bases();
       }
     }
 

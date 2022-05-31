@@ -3573,7 +3573,7 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
 // We are only going to split nodes that match the following requirements:
 //  - It's a Phi node and EA has deemed it as NoEscape.
 //  - At least one of the merge inputs of the Phi points to an Allocate node.
-bool ConnectionGraph::should_split_this_phi(Node* n, Unique_Node_List& splitted_phi_nodes) {
+bool ConnectionGraph::should_split_this_phi(Node* n) {
   ttyLocker ttl;
   if (!n->is_Phi())                     return false;
   if (!is_ideal_node_in_graph(n->_idx)) return false;
@@ -3683,17 +3683,6 @@ bool ConnectionGraph::should_split_this_phi(Node* n, Unique_Node_List& splitted_
     }
 
     //NOT_PRODUCT(tty->print_cr("\t -> Will%stry to split this %d Phi!", should_split ? " " : " NOT ", n->_idx);)
-
-    // We'll check that all nodes in splitted_phi_nodes were removed from
-    // the IR graph after macro node expansion. We should only check that
-    // the allocates were removed if we indeed ran split_phi_bases.
-    if (should_split) {
-      for (uint next = 0; next < allocates.size(); ++next) {
-        Node* allocate = allocates.at(next);
-        splitted_phi_nodes.push(allocate);
-        //NOT_PRODUCT(tty->print_cr("\t\t\tTo remove this allocate: %d %s", allocate->_idx, allocate->Name());)
-      }
-    }
   }
   //else {
   //  NOT_PRODUCT(tty->print_cr("\tDoesn't merge any Allocate.");)
@@ -3702,7 +3691,7 @@ bool ConnectionGraph::should_split_this_phi(Node* n, Unique_Node_List& splitted_
   return should_split;
 }
 
-void ConnectionGraph::split_bases(Unique_Node_List& splitted_phi_nodes) {
+void ConnectionGraph::split_bases() {
   Unique_Node_List ideal_nodes;
   ideal_nodes.map(_compile->live_nodes(), NULL);
   ideal_nodes.push(_compile->root());
@@ -3732,7 +3721,7 @@ void ConnectionGraph::split_bases(Unique_Node_List& splitted_phi_nodes) {
         Node* candidate_phi = uses_of_region.at(region_use_idx);
 
         // Performs several checks to see if we can/should split this Phi
-        if (should_split_this_phi(candidate_phi, splitted_phi_nodes)) {
+        if (should_split_this_phi(candidate_phi)) {
           // We decided to split the Phi node. Now we go over each of it's use
           // and patch them to use the Phi inputs directly - conditioned on the
           // selector If.

@@ -141,7 +141,7 @@
   notproduct(bool, OptoNoExecute, false,                                    \
           "Attempt to parse and compile but do not execute generated code") \
                                                                             \
-  product(bool, PrintOptoStatistics, false,                                 \
+  notproduct(bool, PrintOptoStatistics, false,                              \
           "Print New compiler statistics")                                  \
                                                                             \
   diagnostic(bool, PrintOptoAssembly, false,                                \

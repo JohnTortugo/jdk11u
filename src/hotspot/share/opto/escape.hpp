@@ -549,7 +549,7 @@ private:
   PhiNode *create_split_phi(PhiNode *orig_phi, int alias_idx, GrowableArray<PhiNode *>  &orig_phi_worklist, bool &new_created);
   PhiNode *split_memory_phi(PhiNode *orig_phi, int alias_idx, GrowableArray<PhiNode *>  &orig_phi_worklist);
 
-  bool should_split_this_phi(Node* n, Unique_Node_List& splitted_phi_nodes);
+  bool should_split_this_phi(Node* n);
   Node* create_selector_phi(Node* orig_phi);
   void clone_addp_and_load_chain(Node* original_phi, uint idx, Node* original_addp, Node* final_merge_phi);
   void split_phi_for_addp(Node* orig_phi, Node* use);
