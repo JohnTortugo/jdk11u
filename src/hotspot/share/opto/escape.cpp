@@ -3773,7 +3773,6 @@ void ConnectionGraph::split_phi_for_addp(Node* original_phi, Node* original_addp
     _igvn->_worklist.push(use_use);
   }
 
-
   for (uint i=0; i < addp_uses.size(); ++i) {
     Node* addp_use = addp_uses.at(i);
     _igvn->remove_dead_node(addp_use);
