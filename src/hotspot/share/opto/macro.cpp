@@ -2618,11 +2618,13 @@ void PhaseMacroExpand::eliminate_macro_nodes() {
       debug_only(int old_macro_count = C->macro_count(););
       switch (n->class_id()) {
       case Node::Class_Allocate:
-      case Node::Class_AllocateArray:
         success = eliminate_allocate_node(n->as_Allocate());
         if (success) {
           _number_of_allocates_removed++;
         }
+        break;
+      case Node::Class_AllocateArray:
+        success = eliminate_allocate_node(n->as_Allocate());
         break;
       case Node::Class_CallStaticJava:
         success = eliminate_boxing_node(n->as_CallStaticJava());

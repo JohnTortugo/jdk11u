@@ -3556,12 +3556,50 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
 #endif
 }
 
+bool ConnectionGraph::come_from_allocate(Node* n) const {
+  while (true) {
+    switch (n->Opcode()) {
+      case Op_CastPP:
+      case Op_CheckCastPP:
+      case Op_EncodeP:
+      case Op_EncodePKlass:
+      case Op_DecodeN:
+      case Op_DecodeNKlass:
+        n = n->in(1);
+        break;
+      case Op_Proj:
+        assert(n->as_Proj()->_con == TypeFunc::Parms, "Should be proj from a call");
+        n = n->in(0);
+        break;
+      case Op_Parm:
+      case Op_LoadP:
+      case Op_LoadN:
+      case Op_LoadNKlass:
+      SHENANDOAHGC_ONLY(case Op_ShenandoahLoadReferenceBarrier:)
+      case Op_ConP:
+      case Op_CreateEx:
+      case Op_AllocateArray:
+      case Op_Phi:
+        return false;
+      case Op_Allocate:
+        return true;
+      default:
+        if (n->is_Call()) {
+          return false;
+        }
+        assert(false, "Should not reach here. Unmatched %d %s", n->_idx, n->Name());
+    }
+  }
+
+  // should never reach here
+  return false;
+}
 
 //
 // We are only going to split nodes that match the following requirements:
 //  - It's a Phi node and EA has deemed it as NoEscape.
 //  - At least one of the merge inputs of the Phi points to an Allocate node.
-bool ConnectionGraph::should_split_this_phi(Node* n) {
+bool ConnectionGraph::should_split_this_phi(Node* n) const {
   if (!n->is_Phi())                     return false;
   if (!is_ideal_node_in_graph(n->_idx)) return false;
 
@@ -3573,39 +3611,11 @@ bool ConnectionGraph::should_split_this_phi(Node* n) {
 
   // Check if this Phi node actually point to any Allocate node. Try to find *any*
   // Allocate that this Phi might be pointing to.
-  Arena* arena = Thread::current()->resource_area();
-  VectorSet visited(arena);
-  GrowableArray<PointsToNode*> worklist;
-  worklist.push(ptn);
-  while (worklist.length() > 0) {
-    PointsToNode* next = worklist.pop();
-
-    if (visited.test_set(next->idx())) {
-      continue;
-    }
-
-    for (EdgeIterator i(next); i.has_next(); i.next()) {
-      PointsToNode* e = i.get();
-
-      if (e->ideal_node()->Opcode() == Op_Allocate) {
-        should_split = true;
-      }
-
-      worklist.push(e);
-    }
-
-    if (next->is_Field()) {
-      FieldNode* f = (FieldNode*)next;
-
-      for (BaseIterator i(f); i.has_next(); i.next()) {
-        PointsToNode* b = i.get();
-
-        if (b->ideal_node()->Opcode() == Op_Allocate) {
-          should_split = true;
-        }
-
-        worklist.push(b);
-      }
+  for (uint in_idx=1; in_idx<n->req(); in_idx++) {
+    Node* input = n->in(in_idx);
+    if (come_from_allocate(input)) {
+      should_split = true;
+      break;
     }
   }
 
@@ -3653,7 +3663,7 @@ void ConnectionGraph::split_bases() {
   bool prev_delay_transform = _igvn->delay_transform();
   _igvn->set_delay_transform(true);
 
-  NOT_PRODUCT(dump_ir("Before Split_Bases");)
+  //NOT_PRODUCT(dump_ir("Before Split_Bases");)
 
   // Iterate over all IR nodes looking for Regions.
   //   When a region is found we'll look for Phi nodes coming out of the region.

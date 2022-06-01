@@ -2375,7 +2375,7 @@ void Compile::Optimize() {
       PhaseMacroExpand mexp(igvn);
       mexp.eliminate_macro_nodes();
 
-      scaled += mexp._number_of_allocates_removed;
+      scaled = mexp._number_of_allocates_removed;
 
       igvn.set_delay_transform(false);
 
@@ -2387,7 +2387,7 @@ void Compile::Optimize() {
 
     if (SplitPhiBases) {
       ttyLocker ttyl;
-      tty->print_cr("Hash is -> %X -> scaled %u -> %s::%s", hash, scaled, _method->holder()->name()->as_utf8(), _method->name()->as_utf8());
+      tty->print_cr("%X %s::%s %u", hash, _method->holder()->name()->as_utf8(), _method->name()->as_utf8(), scaled);
     }
   }
 
